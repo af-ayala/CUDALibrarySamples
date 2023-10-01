@@ -62,7 +62,7 @@
 using namespace std::chrono;
 using namespace std;
 
-using cpudata_t = std::vector<std::complex<double>>;
+using cpudata_t = std::vector<std::complex<float>>;
 using gpus_t = std::vector<int>;
 using dim_t = std::array<size_t, 3>;
 
@@ -94,7 +94,7 @@ void spmg(dim_t fft, gpus_t gpus, cpudata_t &h_data_in, cpudata_t &h_data_out,
     // Create the plan
     // With multiple gpus, worksize will contain multiple sizes
     size_t workspace_sizes[gpus.size()];
-    CUFFT_CALL(cufftMakePlan3d(plan, fft[0], fft[1], fft[2], CUFFT_Z2Z, workspace_sizes));
+    CUFFT_CALL(cufftMakePlan3d(plan, fft[0], fft[1], fft[2], CUFFT_C2C, workspace_sizes));
 
     cudaLibXtDesc *indesc;
 

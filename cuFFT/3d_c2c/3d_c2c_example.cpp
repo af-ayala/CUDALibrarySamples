@@ -58,18 +58,21 @@
 
 #include "cufft_utils.h"
 
+#include <chrono>
+using namespace std::chrono;
+using namespace std;
 using dim_t = std::array<int, 3>;
 
 int main(int argc, char *argv[]) {
     cufftHandle plan;
     cudaStream_t stream = NULL;
 
-    int n = 2;
+    int n = atoi(argv[1]);
     dim_t fft = {n, n, n};
-    int batch_size = 2;
+    int batch_size = 1;
     int fft_size = batch_size * fft[0] * fft[1] * fft[2];
 
-    using scalar_type = float;
+    using scalar_type = double;
     using data_type = std::complex<scalar_type>;
 
     std::vector<data_type> data(fft_size);
@@ -78,19 +81,14 @@ int main(int argc, char *argv[]) {
         data[i] = data_type(i, -i);
     }
 
-    std::printf("Input array:\n");
-    for (auto &i : data) {
-        std::printf("%f + %fj\n", i.real(), i.imag());
-    }
-    std::printf("=====\n");
 
-    cufftComplex *d_data = nullptr;
+    cufftDoubleComplex *d_data = nullptr;
 
     CUFFT_CALL(cufftCreate(&plan));
     CUFFT_CALL(cufftPlanMany(&plan, fft.size(), fft.data(), nullptr, 1,
                              fft[0] * fft[1] * fft[2],             // *inembed, istride, idist
                              nullptr, 1, fft[0] * fft[1] * fft[2], // *onembed, ostride, odist
-                             CUFFT_C2C, batch_size));
+                             CUFFT_Z2Z, batch_size));
 
     CUDA_RT_CALL(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking));
     CUFFT_CALL(cufftSetStream(plan, stream));
@@ -100,23 +98,27 @@ int main(int argc, char *argv[]) {
     CUDA_RT_CALL(cudaMemcpyAsync(d_data, data.data(), sizeof(data_type) * data.size(),
                                  cudaMemcpyHostToDevice, stream));
 
-    /*
-     * Note:
-     *  Identical pointers to data and output arrays implies in-place transformation
-     */
-    CUFFT_CALL(cufftExecC2C(plan, d_data, d_data, CUFFT_FORWARD));
-    CUFFT_CALL(cufftExecC2C(plan, d_data, d_data, CUFFT_INVERSE));
+// warmup
+    CUFFT_CALL(cufftExecZ2Z(plan, d_data, d_data, CUFFT_FORWARD));
+
+CUDA_RT_CALL(cudaDeviceSynchronize());
+auto start = high_resolution_clock::now();
+for(int i=0; i<20; ++i)
+  {
+    CUFFT_CALL(cufftExecZ2Z(plan, d_data, d_data, CUFFT_FORWARD));
+  }
+CUDA_RT_CALL(cudaDeviceSynchronize());
+auto stop = high_resolution_clock::now();
+auto duration = duration_cast<microseconds>(stop-start);
+
+std::printf("%d, %f \n", n, duration.count()/20.);
+
 
     CUDA_RT_CALL(cudaMemcpyAsync(data.data(), d_data, sizeof(data_type) * data.size(),
                                  cudaMemcpyDeviceToHost, stream));
 
     CUDA_RT_CALL(cudaStreamSynchronize(stream));
 
-    std::printf("Output array:\n");
-    for (auto &i : data) {
-        std::printf("%f + %fj\n", i.real(), i.imag());
-    }
-    std::printf("=====\n");
 
     /* free resources */
     CUDA_RT_CALL(cudaFree(d_data))

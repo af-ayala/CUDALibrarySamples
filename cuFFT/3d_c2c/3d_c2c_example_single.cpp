@@ -47,6 +47,7 @@
  * Users Notice.
  */
 
+#include <array>
 #include <complex>
 #include <iostream>
 #include <random>
@@ -59,14 +60,17 @@
 
 #include <chrono>
 using namespace std::chrono;
+using namespace std;
+using dim_t = std::array<int, 3>;
 
 int main(int argc, char *argv[]) {
     cufftHandle plan;
     cudaStream_t stream = NULL;
 
-    int n = std::atoi(argv[1]);
+    int n = atoi(argv[1]);
+    dim_t fft = {n, n, n};
     int batch_size = 1;
-    int fft_size = batch_size * n;
+    int fft_size = batch_size * fft[0] * fft[1] * fft[2];
 
     using scalar_type = float;
     using data_type = std::complex<scalar_type>;
@@ -74,15 +78,17 @@ int main(int argc, char *argv[]) {
     std::vector<data_type> data(fft_size);
 
     for (int i = 0; i < fft_size; i++) {
-	//data[i] = data_type(i, -i);
-        data[i] = data_type(0.0, -0.0);
+        data[i] = data_type(i, -i);
     }
 
 
     cufftComplex *d_data = nullptr;
 
     CUFFT_CALL(cufftCreate(&plan));
-    CUFFT_CALL(cufftPlan1d(&plan, data.size(), CUFFT_C2C, batch_size));
+    CUFFT_CALL(cufftPlanMany(&plan, fft.size(), fft.data(), nullptr, 1,
+                             fft[0] * fft[1] * fft[2],             // *inembed, istride, idist
+                             nullptr, 1, fft[0] * fft[1] * fft[2], // *onembed, ostride, odist
+                             CUFFT_C2C, batch_size));
 
     CUDA_RT_CALL(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking));
     CUFFT_CALL(cufftSetStream(plan, stream));
@@ -91,12 +97,6 @@ int main(int argc, char *argv[]) {
     CUDA_RT_CALL(cudaMalloc(reinterpret_cast<void **>(&d_data), sizeof(data_type) * data.size()));
     CUDA_RT_CALL(cudaMemcpyAsync(d_data, data.data(), sizeof(data_type) * data.size(),
                                  cudaMemcpyHostToDevice, stream));
-
-    /*
-     * Note:
-     *  Identical pointers to data and output arrays implies in-place transformation
-     */
-
 
 // warmup
     CUFFT_CALL(cufftExecC2C(plan, d_data, d_data, CUFFT_FORWARD));
